@@ -1,30 +1,26 @@
-import logging
+     import logging
 import os
-from anthropic import Anthropic
+from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # =============================================
-# SOZLAMALAR — shu yerga o'z tokenlaringizni kiriting
+# SOZLAMALAR
 # =============================================
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"   # @BotFather dan olingan token
-ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY" # console.anthropic.com dan olingan kalit
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "YOUR_TELEGRAM_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
 
-# =============================================
-# Claude mijozi
-# =============================================
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
+# Groq mijozi
+client = Groq(api_key=GROQ_API_KEY)
 
 # Har bir foydalanuvchi uchun suhbat tarixi
 user_conversations = {}
 
-# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
 
 SYSTEM_PROMPT = """Sen O'zbek tilida javob beradigan aqlli yordamchi botsan.
 Foydalanuvchilar bilan do'stona, qisqa va aniq muloqot qil.
@@ -33,10 +29,8 @@ Agar savol tushunarsiz bo'lsa, qayta so'ra."""
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bot ishga tushganda birinchi xabar"""
     user_id = update.effective_user.id
-    user_conversations[user_id] = []  # Suhbat tarixini tozalash
-
+    user_conversations[user_id] = []
     await update.message.reply_text(
         "👋 Salom! Men AI yordamchi botman.\n\n"
         "Istalgan savolingizni yozing — javob beraman! 🤖\n\n"
@@ -48,17 +42,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Suhbat tarixini tozalash"""
     user_id = update.effective_user.id
     user_conversations[user_id] = []
-    await update.message.reply_text("✅ Suhbat tarixi tozalandi. Yangi suhbat boshlashingiz mumkin!")
+    await update.message.reply_text("✅ Suhbat tarixi tozalandi!")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Yordam xabari"""
     await update.message.reply_text(
         "ℹ️ *Yordam*\n\n"
-        "Bu bot Claude AI yordamida ishlaydi.\n\n"
+        "Bu bot Groq AI yordamida ishlaydi.\n\n"
         "• Istalgan savol yozing\n"
         "• Bot O'zbek tilida javob beradi\n"
         "• /clear — Suhbatni tozalash\n\n"
@@ -68,42 +60,37 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Foydalanuvchi xabarini Claude API orqali javoblash"""
     user_id = update.effective_user.id
     user_text = update.message.text
 
-    # Suhbat tarixini boshlash
     if user_id not in user_conversations:
         user_conversations[user_id] = []
 
-    # Yozmoqda... ko'rsatish
     await context.bot.send_chat_action(
         chat_id=update.effective_chat.id,
         action="typing"
     )
 
-    # Foydalanuvchi xabarini tarixga qo'shish
     user_conversations[user_id].append({
         "role": "user",
         "content": user_text
     })
 
-    # Tarixni 20 ta xabarga cheklash (xotira tejash)
     if len(user_conversations[user_id]) > 20:
         user_conversations[user_id] = user_conversations[user_id][-20:]
 
     try:
-        # Claude API ga so'rov yuborish
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            messages=user_conversations[user_id]
+        response = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                *user_conversations[user_id]
+            ],
+            max_tokens=1024
         )
 
-        bot_reply = response.content[0].text
+        bot_reply = response.choices[0].message.content
 
-        # Bot javobini tarixga qo'shish
         user_conversations[user_id].append({
             "role": "assistant",
             "content": bot_reply
@@ -119,20 +106,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    """Botni ishga tushirish"""
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Buyruqlar
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("help", help_command))
-
-    # Oddiy xabarlar
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
     logger.info("Bot ishga tushdi...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    main()
+    main()   
