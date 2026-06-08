@@ -1,6 +1,5 @@
 import logging
 import os
-import asyncio
 from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -62,17 +61,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(bot_reply)
     except Exception as e:
         logger.error(f"Xato: {e}")
-        await update.message.reply_text("Kechirasiz, xato yuz berdi. Qaytadan urinib koring.")
+        await update.message.reply_text("Kechirasiz, xato yuz berdi.")
 
 
-async def main():
+def main():
+    logger.info("Bot ishga tushdi...")
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("Bot ishga tushdi...")
-    await app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
