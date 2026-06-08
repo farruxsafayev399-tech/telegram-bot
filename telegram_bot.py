@@ -2,74 +2,111 @@ import logging
 import os
 from groq import Groq
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+# Tokenlar Render Environment Variables orqali olinadi
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 client = Groq(api_key=GROQ_API_KEY)
-user_conversations = {}
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    level=logging.INFO,
 )
+
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = "Sen O'zbek tilida javob beradigan aqlli yordamchi botsan. Barcha javoblarni faqat O'zbek tilida ber."
+SYSTEM_PROMPT = """
+Sen O'zbek tilida javob beradigan aqlli AI yordamchisan.
+Barcha javoblarni O'zbek tilida ber.
+"""
+
+user_conversations = {}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_conversations[user_id] = []
+
     await update.message.reply_text(
-        "Salom! Men AI yordamchi botman.\n\n"
-        "Istalgan savolingizni yozing!\n\n"
-        "/start - Botni qayta boshlash\n"
-        "/clear - Suhbat tarixini tozalash"
+        "Salom!\n\n"
+        "Men AI yordamchi botman.\n"
+        "Savolingizni yuboring.\n\n"
+        "/clear - tarixni tozalash"
     )
 
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_conversations[user_id] = []
-    await update.message.reply_text("Suhbat tarixi tozalandi!")
+    await update.message.reply_text("Suhbat tarixi tozalandi.")
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
     user_id = update.effective_user.id
-    user_text = update.message.text
+    text = update.message.text
 
     if user_id not in user_conversations:
         user_conversations[user_id] = []
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    user_conversations[user_id].append(
+        {"role": "user", "content": text}
+    )
 
-    user_conversations[user_id].append({"role": "user", "content": user_text})
-
-    if len(user_conversations[user_id]) > 20:
-        user_conversations[user_id] = user_conversations[user_id][-20:]
+    # Oxirgi 20 ta xabarni saqlash
+    user_conversations[user_id] = user_conversations[user_id][-20:]
 
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + user_conversations[user_id],
-            max_tokens=1024
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT}
+            ] + user_conversations[user_id],
+            temperature=0.7,
+            max_tokens=1024,
         )
-        bot_reply = response.choices[0].message.content
-        user_conversations[user_id].append({"role": "assistant", "content": bot_reply})
-        await update.message.reply_text(bot_reply)
+
+        answer = response.choices[0].message.content
+
+        user_conversations[user_id].append(
+            {"role": "assistant", "content": answer}
+        )
+
+        await update.message.reply_text(answer)
+
     except Exception as e:
-        logger.error(f"Xato: {e}")
-        await update.message.reply_text("Kechirasiz, xato yuz berdi.")
+        logger.error(e)
+        await update.message.reply_text(
+            "Xatolik yuz berdi. Keyinroq urinib ko'ring."
+        )
 
 
 def main():
-    logger.info("Bot ishga tushdi...")
+    if not TELEGRAM_TOKEN:
+        raise ValueError("TELEGRAM_TOKEN topilmadi")
+
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY topilmadi")
+
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, chat)
+    )
+
+    print("Bot ishga tushdi...")
     app.run_polling(drop_pending_updates=True)
 
 
